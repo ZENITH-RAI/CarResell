@@ -1,0 +1,19 @@
+FOR FRONT END :
+year: min = 1983, max = 2020
+km_driven: min = 1, max = 2360457
+mileage: min = 0.0, max = 42.0
+engine: min = 624.0, max = 3604.0
+max_power: min = 0.0, max = 400.0
+seats: min = 2.0, max = 14.0
+fuel: ['Diesel' 'Petrol' 'LPG' 'CNG']
+seller_type: ['Individual' 'Dealer' 'Trustmark Dealer']
+transmission: ['Manual' 'Automatic']
+owner: ['First Owner' 'Second Owner' 'Third Owner' 'Fourth & Above Owner'
+'Test Drive Car']
+brand: ['Maruti' 'Skoda' 'Honda' 'Hyundai' 'Toyota' 'Ford' 'Renault' 'Mahindra'
+'Tata' 'Chevrolet' 'Fiat' 'Datsun' 'Jeep' 'Mercedes-Benz' 'Mitsubishi'
+'Audi' 'Volkswagen' 'BMW' 'Nissan' 'Lexus' 'Jaguar' 'Land' 'MG' 'Volvo'
+'Daewoo' 'Kia' 'Force' 'Ambassador' 'Ashok' 'Isuzu' 'Opel' 'Peugeot']
+model: ['Swift Dzire VDI' 'Rapid 1.5 TDI Ambition' 'City 2017-2020 EXi' ...
+'Nexon 1.5 Revotorq XT' 'Freestyle Titanium Plus Diesel BSIV'
+'Innova 2.5 GX (Diesel) 8 Seater BS IV'
