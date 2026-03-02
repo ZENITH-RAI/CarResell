@@ -1,0 +1,217 @@
+import pandas as pd
+import numpy as np
+
+np.random.seed(42)
+
+# ----------------------------
+# 1️⃣ LOAD AND CLEAN DATA
+# ----------------------------
+df = pd.read_csv("UsedCars.csv")
+
+df = df.drop(columns=['torque'], errors='ignore')
+df = df.drop_duplicates()
+
+# Split brand & model
+df['brand'] = df['name'].str.split().str[0]
+df['model'] = df['name'].str.split().str[1:].str.join(' ')
+df = df.drop(columns=['name'])
+
+# Clean numeric columns
+for col, suffix in [('mileage', ' kmpl'),
+                    ('engine', ' CC'),
+                    ('max_power', ' bhp')]:
+    df[col] = pd.to_numeric(
+        df[col].astype(str).str.replace(suffix, '', regex=False),
+        errors='coerce'
+    )
+
+# Feature engineering
+CURRENT_YEAR = 2026
+df['car_age'] = CURRENT_YEAR - df['year']
+df['km_per_year'] = df['km_driven'] / (df['car_age'] + 1)
+df['is_7_seater'] = (df['seats'] >= 7).astype(int)
+df['engine_power_ratio'] = df['engine'] / (df['max_power'] + 1)
+
+# Train/Test Split
+train = df.sample(frac=0.8, random_state=42)
+test = df.drop(train.index)
+
+# ----------------------------
+# 2️⃣ FULL PIPELINE
+# ----------------------------
+class FullPipeline:
+
+    def __init__(self):
+        self.numeric_cols = []
+        self.mean_std = {}
+        self.fill_values = {}
+        self.feature_columns = []
+
+    def _feature_engineering(self, df):
+        df = df.copy()
+
+        if 'year' in df.columns:
+            df['car_age'] = CURRENT_YEAR - df['year']
+
+        if 'km_driven' in df.columns:
+            df['km_per_year'] = df['km_driven'] / (df['car_age'] + 1)
+
+        if 'seats' in df.columns:
+            df['is_7_seater'] = (df['seats'] >= 7).astype(int)
+
+        if 'engine' in df.columns and 'max_power' in df.columns:
+            df['engine_power_ratio'] = df['engine'] / (df['max_power'] + 1)
+
+        return df
+
+    def fit(self, df):
+        df = self._feature_engineering(df)
+
+        y = df['selling_price']
+        df = df.drop(columns=['selling_price', 'model'], errors='ignore')
+
+        df = pd.get_dummies(df, drop_first=True)
+
+        self.numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+
+        self.fill_values = df.mean(numeric_only=True)
+        df = df.fillna(self.fill_values)
+
+        for col in self.numeric_cols:
+            mean = df[col].mean()
+            std = df[col].std()
+            if std == 0:
+                std = 1
+            self.mean_std[col] = (mean, std)
+            df[col] = (df[col] - mean) / std
+
+        self.feature_columns = df.columns.tolist()
+        return df
+
+    def transform(self, df):
+        df = self._feature_engineering(df)
+        df = df.drop(columns=['model'], errors='ignore')
+        df = pd.get_dummies(df, drop_first=True)
+
+        for col in self.feature_columns:
+            if col not in df.columns:
+                df[col] = 0
+
+        df = df[self.feature_columns]
+        df = df.fillna(self.fill_values)
+
+        for col in self.numeric_cols:
+            mean, std = self.mean_std[col]
+            df[col] = (df[col] - mean) / std
+
+        return df
+
+# ----------------------------
+# 3️⃣ STABLE SGD REGRESSOR
+# ----------------------------
+class SGDRegressor:
+
+    def __init__(self, lr=0.003, epochs=300, l2=0.01):
+        self.lr = lr
+        self.epochs = epochs
+        self.l2 = l2
+        self.coef_ = None
+        self.intercept_ = 0.0
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+
+        n, m = X.shape
+        self.coef_ = np.zeros(m)
+
+        for epoch in range(self.epochs):
+
+            lr = self.lr / (1 + 0.01 * epoch)
+            indices = np.random.permutation(n)
+
+            for i in indices:
+                xi = X[i]
+                yi = y[i]
+
+                y_pred = np.dot(xi, self.coef_) + self.intercept_
+                error = y_pred - yi
+
+                self.coef_ -= lr * (2 * error * xi + 2 * self.l2 * self.coef_)
+                self.intercept_ -= lr * 2 * error
+
+            if (epoch + 1) % 50 == 0:
+                train_pred = np.dot(X, self.coef_) + self.intercept_
+                loss = np.mean((y - train_pred) ** 2)
+                print(f"Epoch {epoch+1}/{self.epochs} | Train Loss: {loss:.4f}")
+
+    def predict(self, X):
+        X = np.asarray(X, dtype=np.float64)
+        return np.dot(X, self.coef_) + self.intercept_
+
+# ----------------------------
+# 4️⃣ TRAIN MODEL
+# ----------------------------
+pipeline = FullPipeline()
+
+X_train = pipeline.fit(train)
+X_test = pipeline.transform(test)
+
+y_train = np.log1p(train['selling_price'])
+y_test = np.log1p(test['selling_price'])
+
+model = SGDRegressor(lr=0.003, epochs=350, l2=0.01)
+model.fit(X_train, y_train)
+
+# ----------------------------
+# 5️⃣ EVALUATION METRICS
+# ----------------------------
+
+# Predict
+y_pred_log = model.predict(X_test)
+
+# Convert back from log
+y_pred = np.expm1(y_pred_log)
+y_true = np.expm1(y_test)
+
+# Metrics
+mse = np.mean((y_true - y_pred) ** 2)
+mae = np.mean(np.abs(y_true - y_pred))
+r2 = 1 - (np.sum((y_true - y_pred) ** 2) /
+          np.sum((y_true - np.mean(y_true)) ** 2))
+mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+
+print("\n📊 MODEL PERFORMANCE")
+print("----------------------------")
+print(f"R2 Score : {r2:.4f}")
+print(f"MAE      : {mae:.2f}")
+print(f"MSE      : {mse:.2f}")
+print(f"MAPE     : {mape:.2f}%")
+
+# ----------------------------
+# 6️⃣ PREDICTION FUNCTION
+# ----------------------------
+def predict_price(user_input_dict):
+    user_df = pd.DataFrame([user_input_dict])
+    user_processed = pipeline.transform(user_df)
+    pred_log = model.predict(user_processed)
+    return float(np.expm1(pred_log[0]))
+
+# Example usage
+user_input = {
+        'year': 2016,
+        'km_driven': 0,
+        'fuel': 'Diesel',
+        'seller_type': 'Individual',
+        'transmission': 'Manual',
+        'owner': 'First Owner',
+        'mileage': 23.00,
+        'engine': 1396.0,
+        'max_power': 90.00,
+        'seats': 5.0,
+        'brand': 'Hyundai',
+        'model': 'i20 Sportz'
+}
+
+predicted_price = predict_price(user_input)
+print("\nPredicted Selling Price:", int(predicted_price))
